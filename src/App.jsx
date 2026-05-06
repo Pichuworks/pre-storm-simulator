@@ -187,8 +187,20 @@ function HCell({c,px,py,round,sel,reachable,reachColor,players,onClick}) {
   if(isReach&&!stormed)stroke=rc;
   const sk=c.sticker&&!stormed?({green:C.skG,blue:C.skB,red:C.skR,yellow:C.skY}[c.sticker]):null;
   const pts=hexPts(px,py);
+  // Tooltip
+  const terrain = c.terrain==="obstacle"?"障碍物":c.terrain==="grass"?"荒草":c.terrain==="tunnel"?"密道":c.terrain==="car"?"汽车":null;
+  const sticker = c.sticker?({green:"物资格",blue:"事件格",red:"战斗格",yellow:"宝藏格"}[c.sticker]):null;
+  const stormInfo = isW?(stormed?"已被暴雨覆盖":warn?`下回合被暴雨覆盖`:`暴雨第${c.stormRound}回合到达`):"";
+  const tipParts = [`[${c.col},${c.row}]`];
+  if(terrain) tipParts.push(terrain);
+  if(sticker&&!stormed) tipParts.push(sticker);
+  if(c.terrain==="grass"&&c.sticker&&!stormed) tipParts.push("(隐藏)");
+  if(stormInfo) tipParts.push(stormInfo);
+  if(isReach) tipParts.push("可到达");
+  const tip = tipParts.join(" · ");
   return (
     <g onClick={()=>onClick(c)} style={{cursor:isReach?"pointer":"default"}} opacity={stormed?0.6:1}>
+      <title>{tip}</title>
       {stormed&&<polygon points={pts} fill={C.sGlow} opacity={0.06} filter="url(#gl)"/>}
       <polygon points={pts} fill={fill} stroke={sel?C.goldBr:stroke} strokeWidth={sel?1.2:isReach?1.0:0.5}/>
       {isReach&&!stormed&&<polygon points={pts} fill={rc} opacity={0.2}/>}
@@ -202,8 +214,9 @@ function HCell({c,px,py,round,sel,reachable,reachColor,players,onClick}) {
   );
 }
 
-function Slot({label,Icon}) {
-  return (<div style={{width:38,height:50,border:`1px solid ${C.border}`,borderRadius:2,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:`linear-gradient(180deg,${C.frameLt},${C.frame})`,gap:2}}><Icon size={14} color={C.goldDim} strokeWidth={1.5}/><span style={{fontSize:8,color:C.txtDim,letterSpacing:0.5}}>{label}</span></div>);
+function Slot({label,Icon,big}) {
+  const w=big?52:38, h=big?64:50, fs=big?11:8, is=big?18:14;
+  return (<div style={{width:w,height:h,border:`1px solid ${C.border}`,borderRadius:2,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:`linear-gradient(180deg,${C.frameLt}e0,${C.frame}e0)`,gap:2}}><Icon size={is} color={C.goldDim} strokeWidth={1.5}/><span style={{fontSize:fs,color:C.txtDim,letterSpacing:0.5}}>{label}</span></div>);
 }
 
 function BoardView({cells,round,sel,reachable,players,onClick,label,sub,isWild}) {
@@ -611,17 +624,23 @@ export default function App() {
     </div>
   );
 
-  const boardBlock = (side, label, icon) => {
+  const boardBlock = (side, label, icon, cards) => {
     const isW = side === "wild";
     const cells = isW ? board.wild : board.safe;
     return (
-      <div style={{background:C.frame,border:`1px solid ${C.border}`,borderRadius:3,padding:"3px 4px",display:"flex",flexDirection:"column",...(isMob?{height:220}:{flex:1,minHeight:0})}}>
-        <div style={{display:"flex",alignItems:"center",gap:4,padding:"2px 4px"}}>
-          {icon}<span style={{fontSize:9,color:C.goldDim,letterSpacing:1}}>{label}</span>
+      <div style={{background:C.frame,border:`1px solid ${C.border}`,borderRadius:3,padding:isMob?"3px 4px":"10px 14px",display:"flex",flexDirection:"column",position:"relative",...(isMob?{height:220}:{flex:1,minHeight:0})}}>
+        <div style={{display:"flex",alignItems:"center",gap:4,padding:"2px 4px",marginBottom:isMob?0:4}}>
+          {icon}<span style={{fontSize:isMob?9:16,color:C.goldDim,letterSpacing:1}}>{label}</span>
         </div>
-        <div style={{flex:1,minHeight:0}}>
+        <div style={{flex:1,minHeight:0,margin:isMob?"0":"0 62px"}}>
           <BoardSVG cells={cells} round={round} sel={sel} reachable={curPlayer.side===side?reachable:null} reachColor={REACH_COLORS[curPid]} players={players.filter(p=>p.side===side)} onClick={handleCellClick}/>
         </div>
+        {!isMob && cards && <>
+          <div style={{position:"absolute",top:45,left:8}}>{cards[0]}</div>
+          <div style={{position:"absolute",bottom:8,left:8}}>{cards[1]}</div>
+          <div style={{position:"absolute",top:45,right:8}}>{cards[2]}</div>
+          <div style={{position:"absolute",bottom:8,right:8}}>{cards[3]}</div>
+        </>}
       </div>
     );
   };
@@ -653,92 +672,91 @@ export default function App() {
   );
 
   // ─── DESKTOP LAYOUT (3 columns: boards | controls | log) ──
+  const wildCards = [
+    <Slot label="宝物" Icon={Gem} big/>, <Slot label="物资" Icon={Package} big/>,
+    <Slot label="勇气" Icon={Flame} big/>, <Slot label="创造" Icon={Sparkles} big/>,
+  ];
+  const safeCards = [
+    <Slot label="事件" Icon={ScrollText} big/>, <Slot label="敌人" Icon={Skull} big/>,
+    <Slot label="逻辑" Icon={Target} big/>, <Slot label="专注" Icon={Eye} big/>,
+  ];
   return (
     <div style={{background:C.bg,color:C.txt,height:"100vh",fontFamily:"'Noto Serif SC',STSong,SimSun,serif",padding:10,boxSizing:"border-box",display:"flex",flexDirection:"column",overflow:"hidden"}}>
       <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;700&display=swap" rel="stylesheet"/>
       <div style={{display:"flex",gap:10,flex:1,minHeight:0}}>
 
-        {/* LEFT: Boards */}
+        {/* LEFT: Boards with corner cards */}
         <div style={{flex:"1 1 55%",display:"flex",flexDirection:"column",gap:4,minWidth:0}}>
-          {boardBlock("wild","雨前荒野",<CloudRain size={12} color={C.goldDim} strokeWidth={1.5}/>)}
-          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,padding:"2px 0",color:C.txtMute,fontSize:10}}>
-            <div style={{flex:1,height:1,background:C.border}}/><Hexagon size={10} color={C.goldDim} strokeWidth={1.5}/><span>密道</span><Hexagon size={10} color={C.goldDim} strokeWidth={1.5}/><div style={{flex:1,height:1,background:C.border}}/>
+          {boardBlock("wild","雨前荒野",<CloudRain size={16} color={C.goldDim} strokeWidth={1.5}/>,wildCards)}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,padding:"2px 0",color:C.txtMute,fontSize:14}}>
+            <div style={{flex:1,height:1,background:C.border}}/><Hexagon size={12} color={C.goldDim} strokeWidth={1.5}/><span>密道</span><Hexagon size={12} color={C.goldDim} strokeWidth={1.5}/><div style={{flex:1,height:1,background:C.border}}/>
           </div>
-          {boardBlock("safe","抛锚地",<Car size={12} color={C.goldDim} strokeWidth={1.5}/>)}
+          {boardBlock("safe","抛锚地",<Car size={16} color={C.goldDim} strokeWidth={1.5}/>,safeCards)}
         </div>
 
         {/* MIDDLE: Controls & Info */}
-        <div style={{flex:"0 0 300px",display:"flex",flexDirection:"column",gap:6,minHeight:0,overflow:"auto"}}>
-          {/* Title */}
+        <div style={{flex:"1 1 300px",display:"flex",flexDirection:"column",gap:6,minHeight:0,overflow:"auto"}}>
           <div style={{textAlign:"center",borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>
-            <div style={{fontSize:9,color:C.txtMute,letterSpacing:4}}>REVERSE : 1999</div>
-            <div style={{fontSize:18,color:C.gold,fontWeight:300,letterSpacing:3}}>雨前荒野一隅</div>
+            <div style={{fontSize:10,color:C.txtMute,letterSpacing:4}}>REVERSE : 1999</div>
+            <div style={{fontSize:20,color:C.gold,fontWeight:300,letterSpacing:3}}>雨前荒野一隅</div>
           </div>
 
           {/* Status */}
-          <div style={{padding:"8px 10px",background:C.frame,border:`1px solid ${C.border}`,borderRadius:3}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,marginBottom:4}}>
+          <div style={{padding:"8px 12px",background:C.frame,border:`1px solid ${C.border}`,borderRadius:3}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
               <div style={{display:"flex",alignItems:"center",gap:5}}>
-                <CloudRain size={14} color={C.gold} strokeWidth={1.5}/>
-                <span style={{color:C.gold,fontSize:20,fontWeight:700}}>{round}</span><span style={{color:C.txtDim,fontSize:11}}>/ {ROUNDS}</span>
+                <CloudRain size={16} color={C.gold} strokeWidth={1.5}/>
+                <span style={{color:C.gold,fontSize:24,fontWeight:700}}>{round}</span><span style={{color:C.txtDim,fontSize:13}}>/ {ROUNDS}</span>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:5}}>
-                <PieceIcon pid={curPid} size={16}/>
-                <span style={{color:C.gold,fontSize:13}}>{curPlayer.name}</span>
-                {curPlayer.skipNext&&<AlertTriangle size={12} color="#e88060" strokeWidth={2}/>}
-                {stormBlocked&&<CloudRain size={12} color="#e88060" strokeWidth={2}/>}
+                <PieceIcon pid={curPid} size={18}/>
+                <span style={{color:C.gold,fontSize:14}}>{curPlayer.name}</span>
+                {curPlayer.skipNext&&<AlertTriangle size={13} color="#e88060" strokeWidth={2}/>}
+                {stormBlocked&&<CloudRain size={13} color="#e88060" strokeWidth={2}/>}
               </div>
             </div>
-            <div style={{width:"100%",height:4,background:"#1a1508",borderRadius:2,overflow:"hidden",marginBottom:4}}>
-              <div style={{width:`${pct}%`,height:"100%",background:`linear-gradient(90deg,${C.sWarn},${C.sRed})`,borderRadius:2,transition:"width 0.5s"}}/>
+            <div style={{width:"100%",height:5,background:"#1a1508",borderRadius:3,overflow:"hidden",marginBottom:5}}>
+              <div style={{width:`${pct}%`,height:"100%",background:`linear-gradient(90deg,${C.sWarn},${C.sRed})`,borderRadius:3,transition:"width 0.5s"}}/>
             </div>
-            <div style={{fontSize:11,color:C.txtDim,textAlign:"center",padding:"3px 0",border:`1px solid ${C.border}`,borderRadius:2,letterSpacing:2}}>{phaseLabel}</div>
+            <div style={{fontSize:13,color:C.txtDim,textAlign:"center",padding:"3px 0",border:`1px solid ${C.border}`,borderRadius:3,letterSpacing:2}}>{phaseLabel}</div>
           </div>
 
           {/* Actions */}
-          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-            {phase==="skip"&&<Btn onClick={doSkip} icon={SkipForward} warn>跳过行动</Btn>}
+          <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
+            {phase==="skip"&&<button onClick={doSkip} style={{background:"#4a2a1a",color:"#e88060",border:"1px solid #8a3a1a",borderRadius:3,padding:"6px 14px",fontSize:13,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}><SkipForward size={14} strokeWidth={1.5}/>跳过行动</button>}
             {phase==="roll"&&!curPlayer.skipNext&&(
-              <><Btn onClick={doRoll} icon={Dices} active disabled={gameOver}>掷骰</Btn>
-              {isOnCar&&curPlayer.res>=1&&<Btn onClick={startUpgrade} icon={Wrench}>升级汽车</Btn>}</>
+              <><button onClick={doRoll} disabled={gameOver} style={{background:C.gold,color:C.bg,border:`1px solid ${C.gold}`,borderRadius:3,padding:"6px 16px",fontSize:13,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5,fontWeight:700}}><Dices size={15} strokeWidth={1.5}/>掷骰</button>
+              {isOnCar&&curPlayer.res>=1&&<button onClick={startUpgrade} style={{background:C.frame,color:C.txt,border:`1px solid ${C.border}`,borderRadius:3,padding:"6px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}><Wrench size={14} strokeWidth={1.5}/>升级汽车</button>}</>
             )}
-            {phase==="move"&&dice&&<Btn disabled icon={MapPin}>AP: {dice+(carLevels[2]||0)}</Btn>}
-            {phase==="resolve"&&<Btn onClick={nextTurn} icon={ChevronRight} active>{turnIdx>=TURN_ORDER.length-1?"结束回合 → 缩圈":"下一位玩家"}</Btn>}
-            {dice!=null&&<span style={{fontSize:15,color:C.gold,fontWeight:700}}>d10: {dice}</span>}
+            {phase==="move"&&dice&&<span style={{fontSize:13,color:C.txtDim,padding:"6px 12px",border:`1px solid ${C.border}`,borderRadius:3,display:"flex",alignItems:"center",gap:5}}><MapPin size={14} strokeWidth={1.5}/>AP: {dice+(carLevels[2]||0)}</span>}
+            {phase==="resolve"&&<button onClick={nextTurn} style={{background:C.gold,color:C.bg,border:`1px solid ${C.gold}`,borderRadius:3,padding:"6px 16px",fontSize:13,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5,fontWeight:700}}><ChevronRight size={15} strokeWidth={1.5}/>{turnIdx>=TURN_ORDER.length-1?"结束回合 → 缩圈":"下一位玩家"}</button>}
+            {dice!=null&&<span style={{fontSize:18,color:C.gold,fontWeight:700}}>d10: {dice}</span>}
             <div style={{flex:1}}/>
-            <Btn onClick={reset} icon={RotateCcw}>重置</Btn>
+            <button onClick={reset} style={{background:C.frame,color:C.txt,border:`1px solid ${C.border}`,borderRadius:3,padding:"5px 10px",fontSize:12,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:4}}><RotateCcw size={12} strokeWidth={1.5}/>重置</button>
           </div>
 
           {upgradePanel}
 
-          {/* Cards */}
-          <div style={{display:"flex",gap:4,justifyContent:"center"}}>
-            <Slot label="宝物" Icon={Gem}/><Slot label="物资" Icon={Package}/><Slot label="勇气" Icon={Flame}/><Slot label="创造" Icon={Sparkles}/>
-          </div>
-          <div style={{display:"flex",gap:4,justifyContent:"center"}}>
-            <Slot label="事件" Icon={ScrollText}/><Slot label="敌人" Icon={Skull}/><Slot label="逻辑" Icon={Target}/><Slot label="专注" Icon={Eye}/>
-          </div>
-
           {/* Car */}
-          <div style={{padding:"6px 10px",background:C.frame,border:`1px solid ${C.border}`,borderRadius:3,fontSize:11,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-            <Car size={12} color={C.goldDim} strokeWidth={1.5}/><span style={{color:C.txtDim}}>汽车</span>
+          <div style={{padding:"6px 10px",background:C.frame,border:`1px solid ${C.border}`,borderRadius:3,fontSize:13,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+            <Car size={13} color={C.goldDim} strokeWidth={1.5}/><span style={{color:C.txtDim}}>汽车</span>
             {CAR_PARTS.map((p,i)=>(<span key={i} style={{color:carLevels[i]>0?C.gold:C.txtMute}}>{p.icon} {p.name} Lv.{carLevels[i]}</span>))}
           </div>
 
           {/* Cell info */}
-          {info&&(<div style={{padding:"6px 10px",background:C.frame,border:`1px solid ${C.border}`,borderRadius:3,fontSize:11,color:C.txtDim,display:"flex",alignItems:"center",gap:6}}>
-            <CircleDot size={11} color={C.goldDim} strokeWidth={1.5}/>[{sel.col},{sel.row}] <span style={{color:C.gold}}>{info.t}</span> <span>暴雨: {info.st}</span></div>)}
+          {info&&(<div style={{padding:"6px 10px",background:C.frame,border:`1px solid ${C.border}`,borderRadius:3,fontSize:13,color:C.txtDim,display:"flex",alignItems:"center",gap:6}}>
+            <CircleDot size={12} color={C.goldDim} strokeWidth={1.5}/>[{sel.col},{sel.row}] <span style={{color:C.gold}}>{info.t}</span> <span>暴雨: {info.st}</span></div>)}
 
           {/* Players */}
           <div style={{background:C.frame,border:`1px solid ${C.border}`,borderRadius:3,padding:8}}>
-            <div style={{fontSize:10,color:C.txtMute,marginBottom:5}}>PLAYERS · 宝藏 {totalTr}/4</div>
+            <div style={{fontSize:11,color:C.txtMute,marginBottom:5}}>PLAYERS · 宝藏 {totalTr}/4</div>
             {players.map((p,i)=>(
-              <div key={p.id} style={{display:"flex",alignItems:"center",gap:5,fontSize:12,padding:"3px 0",borderLeft:curPid===i?`3px solid ${C.gold}`:"3px solid transparent",paddingLeft:5,opacity:curPid===i?1:0.5}}>
+              <div key={p.id} style={{display:"flex",alignItems:"center",gap:6,fontSize:13,padding:"4px 0",borderLeft:curPid===i?`3px solid ${C.gold}`:"3px solid transparent",paddingLeft:6,opacity:curPid===i?1:0.5}}>
                 <PieceIcon pid={i} size={16}/>
                 <span style={{flex:1}}>{p.name}</span>
-                {p.skipNext&&<AlertTriangle size={10} color="#e88060"/>}
-                {p.stormConsec>=2&&<CloudRain size={10} color="#e88060"/>}
-                <span style={{color:C.txtDim,fontSize:10}}>{p.side==="wild"?"雨前荒野":"抛锚地"} · {p.res}物资{p.treasures?` · ${p.treasures}宝藏`:""}{p.combatBonus?` · 战斗+${p.combatBonus}`:""}</span>
+                {p.skipNext&&<AlertTriangle size={11} color="#e88060"/>}
+                {p.stormConsec>=2&&<CloudRain size={11} color="#e88060"/>}
+                <span style={{color:C.txtDim,fontSize:11}}>{p.side==="wild"?"雨前荒野":"抛锚地"} · {p.res}物资{p.treasures?` · ${p.treasures}宝藏`:""}{p.combatBonus?` · 战斗+${p.combatBonus}`:""}</span>
               </div>
             ))}
           </div>
@@ -746,16 +764,16 @@ export default function App() {
           {/* Legend */}
           <div style={{background:C.frame,border:`1px solid ${C.border}`,borderRadius:3,padding:6,display:"flex",gap:8,flexWrap:"wrap"}}>
             {[[C.skG,"物资"],[C.skB,"事件"],[C.skR,"战斗"],[C.skY,"宝藏"],[C.wObs,"障碍"],[C.wGrass,"荒草"],[C.tunnel,"密道"]].map(([c,l])=>(
-              <div key={l} style={{display:"flex",alignItems:"center",gap:3,fontSize:10}}><div style={{width:8,height:8,borderRadius:2,background:c}}/><span style={{color:C.txtDim}}>{l}</span></div>
+              <div key={l} style={{display:"flex",alignItems:"center",gap:3,fontSize:11}}><div style={{width:8,height:8,borderRadius:2,background:c}}/><span style={{color:C.txtDim}}>{l}</span></div>
             ))}
           </div>
         </div>
 
-        {/* RIGHT: Log */}
-        <div style={{flex:"0 0 220px",display:"flex",flexDirection:"column",minHeight:0}}>
-          <div style={{background:C.frame,border:`1px solid ${C.border}`,borderRadius:3,padding:8,flex:1,overflow:"auto",minHeight:0}}>
-            <div style={{fontSize:10,color:C.txtMute,marginBottom:4,letterSpacing:1,borderBottom:`1px solid ${C.border}`,paddingBottom:3}}>EVENT LOG</div>
-            {log.map((e,i)=><div key={i} style={{fontSize:10,color:i===0?C.txt:C.txtDim,padding:"2px 0",lineHeight:1.4}}>{e}</div>)}
+        {/* RIGHT: Log (2x fonts) */}
+        <div style={{flex:"0 0 240px",display:"flex",flexDirection:"column",minHeight:0}}>
+          <div style={{background:C.frame,border:`1px solid ${C.border}`,borderRadius:4,padding:12,flex:1,overflow:"auto",minHeight:0}}>
+            <div style={{fontSize:14,color:C.txtMute,marginBottom:6,letterSpacing:2,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>EVENT LOG</div>
+            {log.map((e,i)=><div key={i} style={{fontSize:14,color:i===0?C.txt:C.txtDim,padding:"3px 0",lineHeight:1.5}}>{e}</div>)}
           </div>
         </div>
       </div>

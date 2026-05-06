@@ -16,7 +16,7 @@ const STORM_MAX_CONSECUTIVE = 3;
 // Car upgrade structures (placeholder names/effects)
 const CAR_PARTS = [
   { name: "引擎", desc: "暴雨区移动消耗降低", icon: "⚙" },
-  { name: "车身", desc: "突袭判定+20", icon: "🛡" },
+  { name: "车身", desc: "突袭判定+20", icon: "△" },
   { name: "轮胎", desc: "行动点+1", icon: "◎" },
   { name: "油箱", desc: "物资上限+3", icon: "▣" },
 ];
@@ -31,6 +31,7 @@ const C = {
   skG: "#1a7828", skB: "#1a4898", skR: "#b82820", skY: "#b8980a",
   tunnel: "#484898", car: "#b83028", reach: "#c4a55a",
 };
+const REACH_COLORS = ["#ff8830", "#30c8ff", "#60ff40", "#ff50d0"]; // per-player highlight
 const PN = ["神秘学家α", "人类α", "神秘学家β", "人类β"];
 const PF = [["#d8c8b0","#1a1610"],["#d8c8b0","#1a1610"],["#1a1610","#a09880"],["#1a1610","#a09880"]];
 const BISHOP_D = "M0-6.5L-1.8-3.2L-1.2-.5L-2.8 3.5L-2 5L2 5L2.8 3.5L1.2-.5L1.8-3.2Z";
@@ -67,7 +68,7 @@ function getReachable(cells, sCol, sRow, ap, round, side, engineLv) {
   while (queue.length > 0) {
     const { col, row, rem } = queue.shift();
     const k = `${col},${row}`;
-    if (rem === 0 && !(col === sCol && row === sRow)) { exact.add(k); }
+    if (rem === 0) { exact.add(k); }
     if (!allReachable.has(k) || rem < allReachable.get(k)) allReachable.set(k, rem);
     if (rem === 0) continue;
     const dirs = row % 2 === 0 ? NB_EVEN : NB_ODD;
@@ -107,9 +108,12 @@ function genSide(side) {
 function assignStorm(cells, cCol, cRow) {
   const cc = toCube(cCol, cRow);
   cells.forEach(c => { c.dist = cubeDist(toCube(c.col, c.row), cc); });
-  const ids = [...cells].sort((a,b) => b.dist-a.dist || Math.random()-0.5).map(c=>c.id);
-  const gs = Math.ceil(ids.length/ROUNDS);
-  ids.forEach((id,i) => { cells.find(c=>c.id===id).stormRound = Math.min(ROUNDS, Math.floor(i/gs)+1); });
+  const maxDist = Math.max(...cells.map(c => c.dist));
+  // Symmetric: all cells at same distance → same round. Farthest first.
+  cells.forEach(c => {
+    if (maxDist === 0) { c.stormRound = ROUNDS; return; }
+    c.stormRound = Math.max(1, Math.min(ROUNDS, Math.round((maxDist - c.dist) / maxDist * (ROUNDS - 1)) + 1));
+  });
 }
 function setup(cells, isW) {
   const R = () => Math.random();
@@ -166,11 +170,12 @@ function PieceIcon({pid,size=14}) {
 }
 
 // ─── Cell ────────────────────────────────────────────────
-function HCell({c,px,py,round,sel,reachable,players,onClick}) {
+function HCell({c,px,py,round,sel,reachable,reachColor,players,onClick}) {
   const isW=c.side==="wild";
   const stormed=isW&&round>=c.stormRound;
   const warn=isW&&round===c.stormRound-1&&c.stormRound>0;
   const isReach=reachable&&reachable.has(`${c.col},${c.row}`);
+  const rc = reachColor || C.reach;
   let fill,stroke;
   if(stormed){fill=C.sRed;stroke="#400805";}
   else if(c.terrain==="obstacle"){fill=isW?C.wObs:"#486848";stroke=isW?"#48484e":"#385838";}
@@ -179,14 +184,14 @@ function HCell({c,px,py,round,sel,reachable,players,onClick}) {
   else if(c.terrain==="car"){fill="#584828";stroke=C.car;}
   else{fill=isW?C.wBase:C.sBase;stroke=isW?"#a89868":C.sBaseS;}
   if(warn&&!stormed)stroke=C.sWarn;
-  if(isReach&&!stormed)stroke=C.reach;
+  if(isReach&&!stormed)stroke=rc;
   const sk=c.sticker&&!stormed?({green:C.skG,blue:C.skB,red:C.skR,yellow:C.skY}[c.sticker]):null;
   const pts=hexPts(px,py);
   return (
     <g onClick={()=>onClick(c)} style={{cursor:isReach?"pointer":"default"}} opacity={stormed?0.6:1}>
       {stormed&&<polygon points={pts} fill={C.sGlow} opacity={0.06} filter="url(#gl)"/>}
       <polygon points={pts} fill={fill} stroke={sel?C.goldBr:stroke} strokeWidth={sel?1.2:isReach?1.0:0.5}/>
-      {isReach&&!stormed&&<polygon points={pts} fill={C.reach} opacity={0.15}/>}
+      {isReach&&!stormed&&<polygon points={pts} fill={rc} opacity={0.2}/>}
       {warn&&!stormed&&!isReach&&<polygon points={pts} fill={C.sWarn} opacity={0.1}/>}
       {sk&&c.terrain!=="grass"&&<circle cx={px} cy={py} r={2.5} fill={sk} opacity={0.88}/>}
       {sk&&c.terrain==="grass"&&<text x={px} y={py+1.8} textAnchor="middle" fontSize="4.5" fill="#686838">?</text>}
@@ -217,6 +222,19 @@ function BoardView({cells,round,sel,reachable,players,onClick,label,sub,isWild})
         {coords.map(c=>(<HCell key={c.id} c={c} px={c.x} py={c.y} round={round} sel={sel?.id===c.id} reachable={reachable} players={pMap[`${c.col},${c.row}`]} onClick={onClick}/>))}
       </svg>
     </div>
+  );
+}
+
+// Flexible-height board for desktop layout (fills container)
+function BoardSVG({cells,round,sel,reachable,reachColor,players,onClick}) {
+  const coords=useMemo(()=>cells.map(c=>({...c,...cellPx(c.col,c.row)})),[cells]);
+  const bounds=useMemo(()=>{let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;coords.forEach(({x,y})=>{x0=Math.min(x0,x-HEX);x1=Math.max(x1,x+HEX);y0=Math.min(y0,y-HEX);y1=Math.max(y1,y+HEX);});return{x:x0-3,y:y0-3,w:x1-x0+6,h:y1-y0+6};},[coords]);
+  const pMap=useMemo(()=>{const m={};(players||[]).forEach(p=>{const k=`${p.col},${p.row}`;(m[k]=m[k]||[]).push(p);});return m;},[players]);
+  return (
+    <svg viewBox={`${bounds.x} ${bounds.y} ${bounds.w} ${bounds.h}`} preserveAspectRatio="xMidYMid meet" style={{width:"100%",height:"100%"}}>
+      <defs><filter id="gl"><feGaussianBlur stdDeviation="2"/></filter></defs>
+      {coords.map(c=>(<HCell key={c.id} c={c} px={c.x} py={c.y} round={round} sel={sel?.id===c.id} reachable={reachable} reachColor={reachColor} players={pMap[`${c.col},${c.row}`]} onClick={onClick}/>))}
+    </svg>
   );
 }
 
@@ -289,8 +307,15 @@ export default function App() {
   const [reachable, setReachable] = useState(null);
   const [sel, setSel] = useState(null);
   const [log, setLog] = useState(["暴雨即将来临。实验开始——"]);
-  const [carLevels, setCarLevels] = useState([0,0,0,0]); // 4 structures
+  const [carLevels, setCarLevels] = useState([0,0,0,0]);
   const [gameOver, setGameOver] = useState(false);
+  const [mobTab, setMobTab] = useState("wild"); // mobile board tab
+  const [isMob, setIsMob] = useState(typeof window!=="undefined"&&window.innerWidth<768);
+
+  useEffect(()=>{
+    const h=()=>setIsMob(window.innerWidth<768);
+    window.addEventListener("resize",h); return ()=>window.removeEventListener("resize",h);
+  },[]);
 
   // Stable init
   useEffect(() => {
@@ -501,131 +526,166 @@ export default function App() {
 
   const phaseLabel = phase==="roll"?"掷骰":phase==="move"?"移动":phase==="upgrade"?"升级":phase==="skip"?"跳过":"结算";
 
-  return (
-    <div style={{background:C.bg,color:C.txt,minHeight:"100vh",fontFamily:"'Noto Serif SC',STSong,SimSun,serif",padding:8,boxSizing:"border-box"}}>
-      <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;700&display=swap" rel="stylesheet"/>
-      <div style={{textAlign:"center",marginBottom:4,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>
-        <div style={{fontSize:8,color:C.txtMute,letterSpacing:4,fontWeight:300}}>REVERSE : 1999</div>
-        <h1 style={{fontSize:18,color:C.gold,margin:"2px 0",fontWeight:300,letterSpacing:3}}>雨前荒野一隅</h1>
-      </div>
-
-      {/* Status bar */}
-      <div style={{margin:"4px 0",padding:"5px 8px",background:C.frame,border:`1px solid ${C.border}`,borderRadius:2}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:10,marginBottom:3}}>
-          <div style={{display:"flex",alignItems:"center",gap:4}}>
-            <CloudRain size={12} color={C.gold} strokeWidth={1.5}/>
-            <span>回合 </span><span style={{color:C.gold,fontSize:15,fontWeight:700}}>{round}</span><span style={{color:C.txtDim}}>/{ROUNDS}</span>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:6}}>
-            <PieceIcon pid={curPid} size={12}/>
-            <span style={{color:C.gold,fontSize:10}}>{curPlayer.name}</span>
-            {curPlayer.skipNext && <AlertTriangle size={10} color="#e88060" strokeWidth={2}/>}
-            {stormBlocked && <CloudRain size={10} color="#e88060" strokeWidth={2}/>}
-            <span style={{fontSize:9,color:C.txtDim,padding:"1px 5px",border:`1px solid ${C.border}`,borderRadius:2}}>{phaseLabel}</span>
-          </div>
+  // ─── Shared UI blocks ─────────────────────────────────
+  const statusBar = (
+    <div style={{padding:"5px 8px",background:C.frame,border:`1px solid ${C.border}`,borderRadius:2}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:10,marginBottom:3}}>
+        <div style={{display:"flex",alignItems:"center",gap:3}}>
+          <CloudRain size={11} color={C.gold} strokeWidth={1.5}/>
+          <span style={{color:C.gold,fontSize:15,fontWeight:700}}>{round}</span><span style={{color:C.txtDim,fontSize:9}}>/{ROUNDS}</span>
         </div>
-        <div style={{width:"100%",height:3,background:"#1a1508",borderRadius:2,overflow:"hidden"}}>
-          <div style={{width:`${pct}%`,height:"100%",background:`linear-gradient(90deg,${C.sWarn},${C.sRed})`,borderRadius:2,transition:"width 0.5s"}}/>
+        <div style={{display:"flex",alignItems:"center",gap:4}}>
+          <PieceIcon pid={curPid} size={12}/><span style={{color:C.gold,fontSize:10}}>{curPlayer.name}</span>
+          {curPlayer.skipNext&&<AlertTriangle size={9} color="#e88060" strokeWidth={2}/>}
+          {stormBlocked&&<CloudRain size={9} color="#e88060" strokeWidth={2}/>}
+          <span style={{fontSize:9,color:C.txtDim,padding:"1px 5px",border:`1px solid ${C.border}`,borderRadius:2}}>{phaseLabel}</span>
         </div>
       </div>
-
-      {/* Controls */}
-      <div style={{display:"flex",gap:3,margin:"4px 0",flexWrap:"wrap",alignItems:"center"}}>
-        {phase==="skip"&&<Btn onClick={doSkip} icon={SkipForward} warn>跳过行动</Btn>}
-        {phase==="roll"&&!curPlayer.skipNext&&(
-          <>
-            <Btn onClick={doRoll} icon={Dices} active disabled={gameOver}>掷骰</Btn>
-            {isOnCar&&curPlayer.res>=1&&<Btn onClick={startUpgrade} icon={Wrench} small>升级汽车</Btn>}
-          </>
-        )}
-        {phase==="move"&&dice&&<Btn disabled icon={MapPin}>AP:{dice + (carLevels[2]||0)} — 选择目标格</Btn>}
-        {phase==="resolve"&&<Btn onClick={nextTurn} icon={ChevronRight} active>{turnIdx>=TURN_ORDER.length-1?"结束回合→缩圈":"下一位"}</Btn>}
-        {dice!=null&&<span style={{fontSize:11,color:C.gold,fontWeight:700}}>d10:{dice}</span>}
-        <div style={{flex:1}}/>
-        <Btn onClick={reset} icon={RotateCcw} small>重置</Btn>
+      <div style={{width:"100%",height:3,background:"#1a1508",borderRadius:2,overflow:"hidden"}}>
+        <div style={{width:`${pct}%`,height:"100%",background:`linear-gradient(90deg,${C.sWarn},${C.sRed})`,borderRadius:2,transition:"width 0.5s"}}/>
       </div>
+    </div>
+  );
 
-      {/* Upgrade panel */}
-      {phase==="upgrade"&&(
-        <div style={{margin:"4px 0",padding:"5px 8px",background:C.frameLt,border:`1px solid ${C.gold}40`,borderRadius:2}}>
-          <div style={{fontSize:9,color:C.gold,marginBottom:2,display:"flex",alignItems:"center",gap:4}}><Wrench size={10} strokeWidth={1.5}/>汽车升级 · 消耗1物资 · 判定</div>
-          <CarPanel carLevels={carLevels} onUpgrade={doUpgrade} playerRes={curPlayer.res} disabled={false}/>
-        </div>
+  const actionBtns = (
+    <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center"}}>
+      {phase==="skip"&&<Btn onClick={doSkip} icon={SkipForward} warn>跳过</Btn>}
+      {phase==="roll"&&!curPlayer.skipNext&&(
+        <><Btn onClick={doRoll} icon={Dices} active disabled={gameOver}>掷骰</Btn>
+        {isOnCar&&curPlayer.res>=1&&<Btn onClick={startUpgrade} icon={Wrench} small>升级</Btn>}</>
       )}
+      {phase==="move"&&dice&&<Btn disabled icon={MapPin}>AP:{dice+(carLevels[2]||0)}</Btn>}
+      {phase==="resolve"&&<Btn onClick={nextTurn} icon={ChevronRight} active>{turnIdx>=TURN_ORDER.length-1?"缩圈":"下一位"}</Btn>}
+      {dice!=null&&<span style={{fontSize:12,color:C.gold,fontWeight:700}}>d10:{dice}</span>}
+      <div style={{flex:1}}/>
+      <Btn onClick={reset} icon={RotateCcw} small>重置</Btn>
+    </div>
+  );
 
-      {/* Boards */}
-      <div style={{display:"flex",gap:3,alignItems:"center",marginBottom:2}}>
-        <div style={{display:"flex",flexDirection:"column",gap:2}}><Slot label="宝物" Icon={Gem}/><Slot label="物资" Icon={Package}/></div>
-        <div style={{flex:1}}>
-          <BoardView cells={board.wild} round={round} sel={sel} reachable={curPlayer.side==="wild"?reachable:null} players={players.filter(p=>p.side==="wild")} onClick={handleCellClick} label="雨前荒野" sub="布灯侧" isWild/>
+  const upgradePanel = phase==="upgrade" ? (
+    <div style={{padding:"5px 8px",background:C.frameLt,border:`1px solid ${C.gold}40`,borderRadius:2}}>
+      <div style={{fontSize:9,color:C.gold,marginBottom:2,display:"flex",alignItems:"center",gap:4}}><Wrench size={10} strokeWidth={1.5}/>升级 · 消耗1物资</div>
+      <CarPanel carLevels={carLevels} onUpgrade={doUpgrade} playerRes={curPlayer.res} disabled={false}/>
+    </div>
+  ) : null;
+
+  const playersPanel = (
+    <div style={{background:C.frame,border:`1px solid ${C.border}`,borderRadius:2,padding:5}}>
+      <div style={{fontSize:8,color:C.txtMute,marginBottom:3}}>PLAYERS · 宝藏 {totalTr}/4</div>
+      {players.map((p,i)=>(
+        <div key={p.id} style={{display:"flex",alignItems:"center",gap:3,fontSize:9,padding:"2px 0",borderLeft:curPid===i?`2px solid ${C.gold}`:"2px solid transparent",paddingLeft:3,opacity:curPid===i?1:0.5}}>
+          <PieceIcon pid={i} size={13}/><span style={{flex:1}}>{p.name}</span>
+          {p.skipNext&&<AlertTriangle size={8} color="#e88060"/>}
+          {p.stormConsec>=2&&<CloudRain size={8} color="#e88060"/>}
+          <span style={{color:C.txtDim,fontSize:7}}>{p.side==="wild"?"雨前荒野":"抛锚地"} · {p.res}物资{p.treasures?` · ${p.treasures}宝藏`:""}{p.combatBonus?` · 战斗+${p.combatBonus}`:""}</span>
         </div>
-        <div style={{display:"flex",flexDirection:"column",gap:2}}><Slot label="勇气" Icon={Flame}/><Slot label="创造" Icon={Sparkles}/></div>
+      ))}
+    </div>
+  );
+
+  const carBar = (
+    <div style={{padding:"4px 8px",background:C.frame,border:`1px solid ${C.border}`,borderRadius:2,fontSize:8,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
+      <Car size={9} color={C.goldDim} strokeWidth={1.5}/><span style={{color:C.txtDim}}>汽车</span>
+      {CAR_PARTS.map((p,i)=>(<span key={i} style={{color:carLevels[i]>0?C.gold:C.txtMute}}>{p.icon}{p.name}{carLevels[i]}</span>))}
+    </div>
+  );
+
+  const cellInfoBar = info ? (
+    <div style={{padding:"4px 8px",background:C.frame,border:`1px solid ${C.border}`,borderRadius:2,fontSize:9,color:C.txtDim,display:"flex",alignItems:"center",gap:4}}>
+      <CircleDot size={9} color={C.goldDim} strokeWidth={1.5}/>[{sel.col},{sel.row}] <span style={{color:C.gold}}>{info.t}</span> <span>暴雨:{info.st}</span>
+    </div>
+  ) : null;
+
+  const logPanel = (
+    <div style={{background:C.frame,border:`1px solid ${C.border}`,borderRadius:2,padding:5,maxHeight:isMob?100:undefined,flex:isMob?undefined:"1 1 80px",minHeight:isMob?undefined:60,overflow:"auto"}}>
+      <div style={{fontSize:8,color:C.txtMute,marginBottom:2}}>LOG</div>
+      {log.map((e,i)=><div key={i} style={{fontSize:8,color:i===0?C.txt:C.txtMute,padding:"1px 0"}}>{e}</div>)}
+    </div>
+  );
+
+  const legendBar = (
+    <div style={{background:C.frame,border:`1px solid ${C.border}`,borderRadius:2,padding:5,display:"flex",gap:6,flexWrap:"wrap"}}>
+      {[[C.skG,"物资"],[C.skB,"事件"],[C.skR,"战斗"],[C.skY,"宝藏"],[C.wObs,"障碍"],[C.wGrass,"荒草"],[C.tunnel,"密道"]].map(([c,l])=>(
+        <div key={l} style={{display:"flex",alignItems:"center",gap:2,fontSize:8}}><div style={{width:5,height:5,borderRadius:1,background:c}}/><span style={{color:C.txtDim}}>{l}</span></div>
+      ))}
+    </div>
+  );
+
+  const boardBlock = (side, label, icon) => {
+    const isW = side === "wild";
+    const cells = isW ? board.wild : board.safe;
+    return (
+      <div style={{background:C.frame,border:`1px solid ${C.border}`,borderRadius:3,padding:"3px 4px",display:"flex",flexDirection:"column",...(isMob?{height:220}:{flex:1,minHeight:0})}}>
+        <div style={{display:"flex",alignItems:"center",gap:4,padding:"2px 4px"}}>
+          {icon}<span style={{fontSize:9,color:C.goldDim,letterSpacing:1}}>{label}</span>
+        </div>
+        <div style={{flex:1,minHeight:0}}>
+          <BoardSVG cells={cells} round={round} sel={sel} reachable={curPlayer.side===side?reachable:null} reachColor={REACH_COLORS[curPid]} players={players.filter(p=>p.side===side)} onClick={handleCellClick}/>
+        </div>
       </div>
+    );
+  };
 
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0 46px",marginBottom:2}}>
-        <div style={{width:58,height:28,borderRadius:"50%",border:`1px solid ${C.border}`,background:C.frame,display:"flex",alignItems:"center",justifyContent:"center",gap:4}}>
-          <Dices size={12} color={C.goldDim} strokeWidth={1.5}/><span style={{fontSize:7,color:C.txtMute}}>骰子</span>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:4,color:C.txtMute,fontSize:8}}>
-          <div style={{width:20,height:1,background:C.border}}/><Hexagon size={9} color={C.goldDim} strokeWidth={1.5}/>
-          <span>密道</span><Hexagon size={9} color={C.goldDim} strokeWidth={1.5}/><div style={{width:20,height:1,background:C.border}}/>
-        </div>
-        <div style={{width:64,height:32,borderRadius:"50%",border:`1px solid ${C.border}`,background:C.frame,display:"flex",alignItems:"center",justifyContent:"center",gap:3,overflow:"hidden"}}>
-          {[0,1,2,3].map(i=><PieceIcon key={i} pid={i} size={9}/>)}
-        </div>
+  // ─── MOBILE LAYOUT ─────────────────────────────────────
+  if (isMob) return (
+    <div style={{background:C.bg,color:C.txt,minHeight:"100vh",fontFamily:"'Noto Serif SC',STSong,SimSun,serif",padding:6,boxSizing:"border-box"}}>
+      <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;700&display=swap" rel="stylesheet"/>
+      <div style={{textAlign:"center",marginBottom:3}}>
+        <div style={{fontSize:7,color:C.txtMute,letterSpacing:3}}>REVERSE : 1999</div>
+        <div style={{fontSize:14,color:C.gold,fontWeight:300,letterSpacing:2}}>雨前荒野一隅</div>
       </div>
+      {statusBar}
+      <div style={{margin:"4px 0"}}>{actionBtns}</div>
+      {upgradePanel && <div style={{marginBottom:4}}>{upgradePanel}</div>}
+      {boardBlock("wild","雨前荒野",<CloudRain size={10} color={C.goldDim} strokeWidth={1.5}/>)}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:4,padding:"3px 0",color:C.txtMute,fontSize:8}}>
+        <div style={{flex:1,height:1,background:C.border}}/><Hexagon size={8} color={C.goldDim} strokeWidth={1.5}/><span>密道</span><Hexagon size={8} color={C.goldDim} strokeWidth={1.5}/><div style={{flex:1,height:1,background:C.border}}/>
+      </div>
+      {boardBlock("safe","抛锚地",<Car size={10} color={C.goldDim} strokeWidth={1.5}/>)}
+      <div style={{display:"flex",flexDirection:"column",gap:3,marginTop:4}}>
+        {cellInfoBar}
+        {carBar}
+        {playersPanel}
+        {legendBar}
+        {logPanel}
+      </div>
+    </div>
+  );
 
-      <div style={{display:"flex",gap:3,alignItems:"center",marginBottom:3}}>
-        <div style={{display:"flex",flexDirection:"column",gap:2}}><Slot label="事件" Icon={ScrollText}/><Slot label="敌人" Icon={Skull}/></div>
-        <div style={{flex:1}}>
-          <BoardView cells={board.safe} round={round} sel={sel} reachable={curPlayer.side==="safe"?reachable:null} players={players.filter(p=>p.side==="safe")} onClick={handleCellClick} label="抛锚地" sub="安全侧" isWild={false}/>
+  // ─── DESKTOP LAYOUT ────────────────────────────────────
+  return (
+    <div style={{background:C.bg,color:C.txt,height:"100vh",fontFamily:"'Noto Serif SC',STSong,SimSun,serif",padding:8,boxSizing:"border-box",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+      <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;700&display=swap" rel="stylesheet"/>
+      <div style={{display:"flex",gap:8,flex:1,minHeight:0}}>
+        {/* LEFT: Boards */}
+        <div style={{flex:"1 1 62%",display:"flex",flexDirection:"column",gap:4,minWidth:0}}>
+          {boardBlock("wild","雨前荒野",<CloudRain size={10} color={C.goldDim} strokeWidth={1.5}/>)}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,padding:"2px 0",color:C.txtMute,fontSize:8}}>
+            <div style={{flex:1,height:1,background:C.border}}/><Hexagon size={9} color={C.goldDim} strokeWidth={1.5}/><span>密道</span><Hexagon size={9} color={C.goldDim} strokeWidth={1.5}/><div style={{flex:1,height:1,background:C.border}}/>
+          </div>
+          {boardBlock("safe","抛锚地",<Car size={10} color={C.goldDim} strokeWidth={1.5}/>)}
         </div>
-        <div style={{display:"flex",flexDirection:"column",gap:2}}><Slot label="逻辑" Icon={Target}/><Slot label="专注" Icon={Eye}/></div>
-      </div>
-
-      {info&&(<div style={{padding:"4px 8px",background:C.frame,border:`1px solid ${C.border}`,borderRadius:2,fontSize:9,color:C.txtDim,marginBottom:3,display:"flex",alignItems:"center",gap:6}}>
-        <CircleDot size={9} color={C.goldDim} strokeWidth={1.5}/><span>[{sel.col},{sel.row}]</span><span style={{color:C.txt}}>距{info.dist}</span><span style={{color:C.gold}}>{info.t}</span><span>暴雨:{info.st}</span></div>)}
-
-      {/* Car status */}
-      <div style={{margin:"0 0 3px",padding:"4px 8px",background:C.frame,border:`1px solid ${C.border}`,borderRadius:2,display:"flex",alignItems:"center",gap:8,fontSize:9}}>
-        <Car size={10} color={C.goldDim} strokeWidth={1.5}/>
-        <span style={{color:C.txtDim}}>汽车</span>
-        {CAR_PARTS.map((p,i)=>(
-          <span key={i} style={{color:carLevels[i]>0?C.gold:C.txtMute}}>{p.icon}{p.name} Lv.{carLevels[i]}</span>
-        ))}
-      </div>
-
-      {/* Players */}
-      <div style={{display:"flex",gap:4,marginBottom:3}}>
-        <div style={{flex:1,background:C.frame,border:`1px solid ${C.border}`,borderRadius:2,padding:5}}>
-          <div style={{fontSize:8,color:C.txtMute,marginBottom:3,letterSpacing:1}}>PLAYERS · 宝{totalTr}/4</div>
-          {players.map((p,i)=>(
-            <div key={p.id} style={{display:"flex",alignItems:"center",gap:3,fontSize:9,padding:"1.5px 0",borderLeft:curPid===i?`2px solid ${C.gold}`:"2px solid transparent",paddingLeft:3,opacity:curPid===i?1:0.6}}>
-              <PieceIcon pid={i} size={14}/>
-              <span>{p.name}</span>
-              {p.skipNext&&<AlertTriangle size={8} color="#e88060" strokeWidth={2}/>}
-              {p.stormConsec>=2&&<CloudRain size={8} color="#e88060" strokeWidth={2}/>}
-              <span style={{color:C.txtDim,marginLeft:"auto",fontSize:8}}>
-                {p.side==="wild"?"荒":"安"} {p.res}资 {p.treasures?`${p.treasures}宝`:""} {p.combatBonus?`+${p.combatBonus}战`:""}
-              </span>
-            </div>
-          ))}
+        {/* RIGHT: Controls */}
+        <div style={{flex:"0 0 280px",display:"flex",flexDirection:"column",gap:4,minHeight:0,overflow:"auto"}}>
+          <div style={{textAlign:"center",borderBottom:`1px solid ${C.border}`,paddingBottom:3}}>
+            <div style={{fontSize:7,color:C.txtMute,letterSpacing:3}}>REVERSE : 1999</div>
+            <div style={{fontSize:15,color:C.gold,fontWeight:300,letterSpacing:2}}>雨前荒野一隅</div>
+          </div>
+          {statusBar}
+          {actionBtns}
+          {upgradePanel}
+          <div style={{display:"flex",gap:3,justifyContent:"center"}}>
+            <Slot label="宝物" Icon={Gem}/><Slot label="物资" Icon={Package}/><Slot label="勇气" Icon={Flame}/><Slot label="创造" Icon={Sparkles}/>
+          </div>
+          <div style={{display:"flex",gap:3,justifyContent:"center"}}>
+            <Slot label="事件" Icon={ScrollText}/><Slot label="敌人" Icon={Skull}/><Slot label="逻辑" Icon={Target}/><Slot label="专注" Icon={Eye}/>
+          </div>
+          {carBar}
+          {cellInfoBar}
+          {playersPanel}
+          {legendBar}
+          {logPanel}
         </div>
-        <div style={{width:88,background:C.frame,border:`1px solid ${C.border}`,borderRadius:2,padding:5}}>
-          <div style={{fontSize:8,color:C.txtMute,marginBottom:3,letterSpacing:1}}>LEGEND</div>
-          {[[C.skG,"物资"],[C.skB,"事件"],[C.skR,"战斗"],[C.skY,"宝藏"],[C.wObs,"障碍"],[C.wGrass,"荒草"],[C.tunnel,"密道"]].map(([c,l])=>(
-            <div key={l} style={{display:"flex",alignItems:"center",gap:3,fontSize:8,padding:"1px 0"}}><div style={{width:5,height:5,borderRadius:1,background:c}}/><span style={{color:C.txtDim}}>{l}</span></div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{background:C.frame,border:`1px solid ${C.border}`,borderRadius:2,padding:5,maxHeight:80,overflow:"auto"}}>
-        <div style={{fontSize:8,color:C.txtMute,marginBottom:2,letterSpacing:1}}>LOG</div>
-        {log.map((e,i)=><div key={i} style={{fontSize:8,color:i===0?C.txt:C.txtMute,padding:"1px 0"}}>{e}</div>)}
-      </div>
-
-      <div style={{textAlign:"center",marginTop:5,fontSize:7,color:C.txtMute,letterSpacing:1,borderTop:`1px solid ${C.border}`,paddingTop:4}}>
-        雨前漫游指南 · Phase 2 · 143×2
       </div>
     </div>
   );

@@ -196,14 +196,17 @@ function HCell({c,px,py,round,sel,reachable,reachColor,players,onClick}) {
   if(sticker&&!stormed) tipParts.push(sticker);
   if(c.terrain==="grass"&&c.sticker&&!stormed) tipParts.push("(隐藏)");
   if(stormInfo) tipParts.push(stormInfo);
-  if(isReach) tipParts.push("可到达");
+  if(isReach) tipParts.push(c.terrain==="tunnel"?"可到达 (传送至另一侧！)":"可到达");
   const tip = tipParts.join(" · ");
+  const isTunnelReach = isReach && c.terrain==="tunnel";
   return (
     <g onClick={()=>onClick(c)} style={{cursor:isReach?"pointer":"default"}} opacity={stormed?0.6:1}>
       <title>{tip}</title>
       {stormed&&<polygon points={pts} fill={C.sGlow} opacity={0.06} filter="url(#gl)"/>}
-      <polygon points={pts} fill={fill} stroke={sel?C.goldBr:stroke} strokeWidth={sel?1.2:isReach?1.0:0.5}/>
-      {isReach&&!stormed&&<polygon points={pts} fill={rc} opacity={0.2}/>}
+      <polygon points={pts} fill={fill} stroke={sel?C.goldBr:isTunnelReach?"#a060e0":stroke} strokeWidth={sel?1.2:isReach?1.2:0.5}/>
+      {isReach&&!stormed&&!isTunnelReach&&<polygon points={pts} fill={rc} opacity={0.2}/>}
+      {isTunnelReach&&<polygon points={pts} fill="#a060e0" opacity={0.25}><animate attributeName="opacity" values="0.1;0.35;0.1" dur="1.2s" repeatCount="indefinite"/></polygon>}
+      {isTunnelReach&&<polygon points={pts} fill="none" stroke="#c080ff" strokeWidth={1.5}><animate attributeName="stroke-opacity" values="0.3;1;0.3" dur="1.2s" repeatCount="indefinite"/></polygon>}
       {warn&&!stormed&&!isReach&&<polygon points={pts} fill={C.sWarn} opacity={0.1}/>}
       {sk&&c.terrain!=="grass"&&<circle cx={px} cy={py} r={2.5} fill={sk} opacity={0.88}/>}
       {sk&&c.terrain==="grass"&&<text x={px} y={py+1.8} textAnchor="middle" fontSize="4.5" fill="#686838">?</text>}
